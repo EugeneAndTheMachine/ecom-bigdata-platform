@@ -1,0 +1,16 @@
+docs: add production implementation guide
+
+Add a complete implementation guide for the REES46 Lambda Lakehouse platform.
+
+The guide documents:
+- the REES46-only scope and the speed, batch, ML, and serving flows;
+- the repository structure and ownership boundaries between infra, pipelines,
+  orchestration, schemas, shared libraries, and services;
+- pinned runtime versions, resource requirements, environment variables, and
+  Docker Compose profiles;
+- step-by-step setup, replay, batch, reconciliation, ML, and smoke-test flows;
+- Kafka, Avro, Delta Lake, ClickHouse, Redis, dbt, Airflow, and API contracts;
+- data-quality gates, idempotency rules, observability, testing strategy, CI,
+  operational runbooks, known risks, and the delivery roadmap.
+
+Validation: not run; documentation-only change.

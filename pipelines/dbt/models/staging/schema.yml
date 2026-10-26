@@ -1,0 +1,20 @@
+version: 2
+
+models:
+  - name: stg_events
+    description: Non-bot events from silver.events.
+    columns:
+      - name: event_id
+        tests: [not_null]
+      - name: price
+        tests:
+          - non_negative
+  - name: stg_sessions
+    columns:
+      - name: user_session
+        tests: [not_null, unique]
+  - name: stg_products
+    description: SCD2 versions of products (daily granularity).
+    columns:
+      - name: product_id
+        tests: [not_null]

@@ -1,0 +1,48 @@
+version: 2
+
+models:
+  - name: dim_date
+    columns:
+      - name: date_key
+        tests: [not_null, unique]
+  - name: dim_product
+    description: SCD2 product dimension; exactly one current version per product.
+    columns:
+      - name: product_key
+        tests: [not_null, unique]
+    tests:
+      - one_current_version_per_product
+  - name: dim_category
+    columns:
+      - name: category_id
+        tests: [not_null]
+  - name: dim_user
+    columns:
+      - name: user_id
+        tests: [not_null, unique]
+  - name: fact_events
+    columns:
+      - name: event_id
+        tests: [not_null, unique]
+      - name: event_type
+        tests:
+          - accepted_values: {arguments: {values: ["view", "cart", "remove_from_cart", "purchase"]}}
+      - name: date_key
+        tests:
+          - relationships: {arguments: {to: ref('dim_date'), field: date_key}}
+  - name: fact_sessions
+    columns:
+      - name: user_session
+        tests: [not_null, unique]
+  - name: fact_order_items
+    columns:
+      - name: order_item_id
+        tests: [not_null, unique]
+      - name: price
+        tests: [non_negative]
+  - name: fact_orders
+    columns:
+      - name: order_id
+        tests: [not_null, unique]
+      - name: revenue
+        tests: [non_negative]

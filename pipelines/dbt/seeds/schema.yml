@@ -1,0 +1,12 @@
+version: 2
+
+seeds:
+  - name: holidays
+    description: >
+      Public & commercial calendar events relevant to REES46 (a Russian multi-category
+      store, Oct 2019 – Apr 2020). Extend for the replay timeline if needed.
+    config:
+      column_types:
+        holiday_date: date
+        holiday_name: varchar
+        holiday_type: varchar

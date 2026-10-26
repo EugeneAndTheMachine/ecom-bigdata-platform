@@ -1,0 +1,23 @@
+version: 2
+
+sources:
+  - name: silver
+    description: Conformed tables written by Spark (pipelines/batch) and registered in Trino.
+    schema: silver
+    tables:
+      - name: events
+        description: One row per deduplicated REES46 event (bots flagged, not removed).
+        loaded_at_field: _ingest_ts
+        freshness:
+          warn_after: {count: 26, period: hour}
+          error_after: {count: 50, period: hour}
+        columns:
+          - name: event_id
+            tests: [not_null]
+          - name: event_type
+            tests:
+              - accepted_values: {arguments: {values: ["view", "cart", "remove_from_cart", "purchase"]}}
+      - name: sessions
+      - name: products_scd2
+      - name: bot_users
+      - name: dq_results

@@ -1,0 +1,16 @@
+version: 2
+
+models:
+  - name: mart_daily_sales
+    description: Q5 — revenue / orders / AOV per day x category x brand.
+    columns:
+      - name: revenue
+        tests: [non_negative]
+  - name: mart_funnel_daily
+    description: Batch funnel used as the reference for the real-time funnel (reconciliation).
+  - name: mart_category_trends
+    description: Weekly category interest with week-over-week growth.
+  - name: mart_price_changes
+    description: Q8 — conversion before/after each price change (SCD2 versions).
+  - name: mart_customer_segments
+    description: Q6 — segment distribution from the RFM + K-means model.

@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<!-- Hive Metastore config. JDO connection comes from SERVICE_OPTS (docker-compose).
+     ${env.X} is expanded by Hadoop Configuration at runtime. -->
+<configuration>
+  <property>
+    <name>metastore.warehouse.dir</name>
+    <value>s3a://lakehouse/warehouse</value>
+  </property>
+  <property>
+    <name>hive.metastore.warehouse.dir</name>
+    <value>s3a://lakehouse/warehouse</value>
+  </property>
+  <property>
+    <name>metastore.thrift.port</name>
+    <value>9083</value>
+  </property>
+  <property>
+    <name>hive.metastore.schema.verification</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>metastore.event.db.notification.api.auth</name>
+    <value>false</value>
+  </property>
+
+  <!-- S3A / MinIO -->
+  <property><name>fs.s3a.endpoint</name><value>http://minio:9000</value></property>
+  <property><name>fs.s3a.path.style.access</name><value>true</value></property>
+  <property><name>fs.s3a.connection.ssl.enabled</name><value>false</value></property>
+  <property><name>fs.s3a.impl</name><value>org.apache.hadoop.fs.s3a.S3AFileSystem</value></property>
+  <property><name>fs.s3a.access.key</name><value>${env.MINIO_ROOT_USER}</value></property>
+  <property><name>fs.s3a.secret.key</name><value>${env.MINIO_ROOT_PASSWORD}</value></property>
+</configuration>

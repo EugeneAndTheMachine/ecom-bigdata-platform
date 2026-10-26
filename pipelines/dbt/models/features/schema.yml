@@ -1,0 +1,17 @@
+version: 2
+
+models:
+  - name: feat_user_offline
+    description: Offline user features (RFM, 7/30-day behaviour). Read by Spark segmentation.
+    columns:
+      - name: user_id
+        tests: [not_null, unique]
+      - name: frequency
+        tests: [non_negative]
+  - name: feat_session_training
+    description: Purchase-intent training rows (label = converted).
+    columns:
+      - name: user_session
+        tests: [not_null, unique]
+      - name: converted
+        tests: [not_null]

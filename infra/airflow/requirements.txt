@@ -1,0 +1,10 @@
+apache-airflow-providers-apache-spark
+apache-airflow-providers-trino
+apache-airflow-providers-standard
+trino
+clickhouse-connect==0.8.11
+redis==5.2.1
+pandas
+pyarrow
+scikit-learn==1.5.2
+boto3

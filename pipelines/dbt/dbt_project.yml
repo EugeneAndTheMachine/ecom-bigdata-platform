@@ -1,0 +1,40 @@
+name: ecom_lakehouse
+version: "1.0.0"
+config-version: 2
+profile: ecom_lakehouse
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  lakehouse_root: "s3a://lakehouse"
+  # incremental models re-process this many days to absorb late events merged into Silver
+  lookback_days: 3
+  # analysis horizon for user features (days)
+  feature_window_days: 30
+
+models:
+  ecom_lakehouse:
+    +on_table_exists: replace          # CREATE OR REPLACE -> Delta keeps history (time travel)
+    staging:
+      +schema: gold_staging
+      +materialized: view
+    marts:
+      +schema: gold
+      +materialized: table
+      core:
+        +tags: ["core"]
+      analytics:
+        +tags: ["analytics"]
+    features:
+      +schema: gold
+      +materialized: table
+      +tags: ["features", "ml"]
+
+seeds:
+  ecom_lakehouse:
+    +schema: gold

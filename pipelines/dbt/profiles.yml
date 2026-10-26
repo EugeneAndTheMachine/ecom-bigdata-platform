@@ -1,0 +1,13 @@
+ecom_lakehouse:
+  target: dev
+  outputs:
+    dev:
+      type: trino
+      method: none
+      host: "{{ env_var('TRINO_HOST', 'trino') }}"
+      port: "{{ env_var('TRINO_INTERNAL_PORT', '8080') | int }}"
+      user: dbt
+      http_scheme: http
+      catalog: "{{ env_var('TRINO_CATALOG', 'delta') }}"
+      schema: gold
+      threads: 4

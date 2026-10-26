@@ -1,0 +1,11 @@
+.git
+.env
+data
+notebooks
+docs
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+.venv
+pipelines/dbt/target
+pipelines/dbt/logs

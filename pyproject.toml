@@ -1,0 +1,22 @@
+[project]
+name = "ecom-bigdata-platform"
+version = "0.1.0"
+description = "Lambda-architecture lakehouse on the REES46 e-commerce clickstream"
+requires-python = ">=3.11,<3.12"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["pipelines/dbt", "notebooks"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+ignore = ["E501", "B008"]  # FastAPI Query() defaults
+
+[tool.ruff.lint.isort]
+known-first-party = ["ecom_common", "pipelines", "producer", "app", "ecom_airflow"]
+
+[tool.pytest.ini_options]
+addopts = "-q --import-mode=importlib"
+testpaths = ["tests", "services/clickstream-producer/tests", "services/recommend-api/tests", "orchestration/airflow/tests"]
+pythonpath = [".", "libs", "services/clickstream-producer", "services/recommend-api", "orchestration/airflow"]

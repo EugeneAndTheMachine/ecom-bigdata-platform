@@ -1,0 +1,20 @@
+{
+  "type": "record",
+  "name": "ClickstreamEvent",
+  "namespace": "com.ecom.clickstream.v1",
+  "doc": "One REES46 behaviour event replayed into Kafka. Subject: ecom.clickstream.v1-value (BACKWARD compatible). New fields MUST have a default.",
+  "fields": [
+    {"name": "event_id", "type": "string", "doc": "UUIDv4 assigned by the producer; used for dedup"},
+    {"name": "event_time", "type": {"type": "long", "logicalType": "timestamp-millis"}, "doc": "Event time after replay shift (drives windows & watermark)"},
+    {"name": "original_event_time", "type": {"type": "long", "logicalType": "timestamp-millis"}, "doc": "Event time as found in the REES46 file"},
+    {"name": "event_type", "type": "string", "doc": "view | cart | remove_from_cart | purchase"},
+    {"name": "product_id", "type": "long"},
+    {"name": "category_id", "type": "long"},
+    {"name": "category_code", "type": ["null", "string"], "default": null, "doc": "e.g. electronics.smartphone (often null in REES46)"},
+    {"name": "brand", "type": ["null", "string"], "default": null},
+    {"name": "price", "type": "double"},
+    {"name": "user_id", "type": "long"},
+    {"name": "user_session", "type": "string"},
+    {"name": "chaos_tag", "type": ["null", "string"], "default": null, "doc": "null for real events; late | dup | bot when injected by the chaos module (ground truth for tests)"}
+  ]
+}

@@ -1,0 +1,10 @@
+# Python libs available on Spark driver AND executors (foreachBatch / applyInPandasWithState / ML)
+pandas==2.2.3
+pyarrow==17.0.0
+numpy==1.26.4
+redis==5.2.1
+clickhouse-connect==0.8.11
+scikit-learn==1.5.2
+boto3==1.35.36
+trino==0.330.0
+PyYAML==6.0.2

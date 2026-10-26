@@ -1,0 +1,68 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - run: pip install -r requirements-dev.txt
+      - name: Lint
+        run: ruff check .
+      - name: Unit tests
+        run: pytest
+      - name: Compose config is valid
+        run: |
+          cp .env.example .env
+          docker compose --profile stream --profile replay --profile batch --profile bi --profile ml --profile obs config -q
+
+  dbt-parse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install "dbt-trino==1.9.0" "dbt-core>=1.10,<2"
+      - name: dbt parse (no warehouse needed)
+        working-directory: pipelines/dbt
+        run: dbt parse --profiles-dir .
+
+  build-images:
+    runs-on: ubuntu-latest
+    needs: lint-test
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp .env.example .env
+      - name: Build custom images
+        run: docker compose --profile stream --profile replay --profile batch --profile ml build
+
+  airflow-dags:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Airflow (constraints)
+        run: |
+          pip install "apache-airflow==3.3.0" apache-airflow-providers-apache-spark apache-airflow-providers-standard pytest \
+            --constraint https://raw.githubusercontent.com/apache/airflow/constraints-3.3.0/constraints-3.11.txt
+      - name: DAG integrity
+        env:
+          AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+          PYTHONPATH: libs:.:orchestration/airflow
+        run: pytest -q orchestration/airflow/tests

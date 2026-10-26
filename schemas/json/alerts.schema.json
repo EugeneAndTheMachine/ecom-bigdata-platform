@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Hot-path output messages (JSON, schemaless on the wire)",
+  "$defs": {
+    "cart_abandon": {
+      "type": "object",
+      "description": "topic alerts.cart_abandon, key = user_id",
+      "required": ["user_session", "user_id", "cart_items", "cart_value", "last_event_time", "alerted_at"],
+      "properties": {
+        "user_session": {"type": "string"},
+        "user_id": {"type": "integer"},
+        "cart_items": {"type": "integer"},
+        "cart_value": {"type": "number"},
+        "last_category": {"type": ["string", "null"]},
+        "last_event_time": {"type": "string", "format": "date-time"},
+        "alerted_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "bot": {
+      "type": "object",
+      "description": "topic alerts.bot, key = user_id",
+      "required": ["user_id", "window_start", "event_count", "zscore", "detected_at"],
+      "properties": {
+        "user_id": {"type": "integer"},
+        "window_start": {"type": "string", "format": "date-time"},
+        "event_count": {"type": "integer"},
+        "zscore": {"type": "number"},
+        "detected_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "session": {
+      "type": "object",
+      "description": "topic agg.sessions, key = user_session (closed sessions)",
+      "required": ["user_session", "user_id", "session_start", "session_end"],
+      "properties": {
+        "user_session": {"type": "string"},
+        "user_id": {"type": "integer"},
+        "session_start": {"type": "string", "format": "date-time"},
+        "session_end": {"type": "string", "format": "date-time"},
+        "duration_s": {"type": "number"},
+        "n_events": {"type": "integer"},
+        "n_views": {"type": "integer"},
+        "n_carts": {"type": "integer"},
+        "n_purchases": {"type": "integer"},
+        "revenue": {"type": "number"}
+      }
+    }
+  }
+}

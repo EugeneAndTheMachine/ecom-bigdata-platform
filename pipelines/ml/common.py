@@ -1,15 +1,38 @@
-"""MLflow helpers: experiment setup and champion/challenger promotion."""
+"""MLflow helpers (experiment setup, champion/challenger promotion) and the training timeline."""
 from __future__ import annotations
+
+from datetime import date
 
 import mlflow
 from mlflow.exceptions import MlflowException
 from mlflow.tracking import MlflowClient
+from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import functions as F
 
 from ecom_common.config import get_settings
 from ecom_common.log import get_logger
+from ecom_common.tables import SILVER_EVENTS
 
 log = get_logger("ml")
 CHAMPION = "champion"
+
+
+def ml_events(spark: SparkSession) -> tuple[DataFrame, date]:
+    """Human Silver events of ONE timeline and its last event_date (the "as of" anchor).
+
+    Replay rows (_source=kafka_connect) carry "now" timestamps, bulk rows (bulk_csv) keep
+    2019-10..2020-04; anchoring "last N days" on the max over both would only ever see replay.
+    Same rule as the dbt macro ml_source_predicate (ML_SOURCE: auto | bulk_csv | kafka_connect | all).
+    """
+    ev = spark.read.format("delta").load(SILVER_EVENTS.path).where("NOT is_bot")
+    source = get_settings().ml_source
+    if source == "auto":
+        source = "bulk_csv" if ev.where(F.col("_source") == "bulk_csv").limit(1).count() else "kafka_connect"
+    if source != "all":
+        ev = ev.where(F.col("_source") == source)
+    as_of = ev.agg(F.max("event_date")).first()[0]
+    log.info("ML timeline source=%s as_of=%s", source, as_of)
+    return ev, as_of
 
 
 def init_experiment(name: str) -> None:

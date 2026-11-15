@@ -19,9 +19,8 @@ from pyspark.sql import functions as F
 from ecom_common.config import get_settings
 from ecom_common.log import get_logger
 from ecom_common.spark import get_spark
-from ecom_common.tables import SILVER_EVENTS
 from ecom_common.transforms import event_weight
-from pipelines.ml.common import init_experiment, latest_champion_run
+from pipelines.ml.common import init_experiment, latest_champion_run, ml_events
 
 log = get_logger("als")
 EXPERIMENT = "als_recommender"
@@ -61,8 +60,7 @@ def ranking_metrics(recs: DataFrame, truth: DataFrame, k: int = K) -> dict[str, 
 def main() -> int:
     spark = get_spark("ml_als_train")
     init_experiment(EXPERIMENT)
-    ev = spark.read.format("delta").load(SILVER_EVENTS.path).where("NOT is_bot")
-    max_date = ev.agg(F.max("event_date")).first()[0]
+    ev, max_date = ml_events(spark)
     cutoff = F.date_sub(F.lit(max_date), HOLDOUT_DAYS)
     history = ev.where(F.col("event_date") > F.date_sub(F.lit(max_date), HISTORY_DAYS))
     train_ev = history.where(F.col("event_date") <= cutoff)

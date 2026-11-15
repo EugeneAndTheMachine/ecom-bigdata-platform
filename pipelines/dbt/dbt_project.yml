@@ -16,6 +16,8 @@ vars:
   lookback_days: 3
   # analysis horizon for user features (days)
   feature_window_days: 30
+  # timeline the ML features are anchored on: auto | bulk_csv | kafka_connect | all (macros/ml_source_predicate.sql)
+  ml_source: "{{ env_var('ML_SOURCE', 'auto') }}"
 
 models:
   ecom_lakehouse:

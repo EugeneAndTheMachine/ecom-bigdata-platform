@@ -29,10 +29,18 @@ def get_client(s: Settings) -> redis.Redis:
     return client_from(s.serving.redis_host, s.serving.redis_port, s.serving.redis_password)
 
 
-def write_trending(r: redis.Redis, rows: Iterable[tuple[str, int, int, float]]) -> None:
+def serving_window_end(latest_end: int, window_s: int, slide_s: int) -> int:
+    """Sliding windows that contain the newest event end anywhere in (t, t + window]. The one
+    with the LARGEST end has only just opened (≈ one slide of data); the one that covers the
+    full last `window` ends one slide after t, i.e. `window - slide` before the largest end."""
+    return latest_end - (window_s - slide_s)
+
+
+def write_trending(r: redis.Redis, rows: Iterable[tuple[str, int, int, float]],
+                   window_s: int, slide_s: int) -> None:
     """rows: (category_l1, window_end_epoch, product_id, score). Update-mode values are FULL
-    aggregates, so ZADD (set) is idempotent. Then the newest window per category becomes
-    `trending:{cat}` via COPY ... REPLACE (atomic swap for readers)."""
+    aggregates, so ZADD (set) is idempotent. Then the window covering the full last `window_s`
+    per category becomes `trending:{cat}` via COPY ... REPLACE (atomic swap for readers)."""
     latest: dict[str, int] = {}
     pipe = r.pipeline(transaction=False)
     for cat, w_end, product_id, score in rows:
@@ -43,8 +51,10 @@ def write_trending(r: redis.Redis, rows: Iterable[tuple[str, int, int, float]]) 
     pipe.execute()
     pipe = r.pipeline(transaction=False)
     for cat, w_end in latest.items():
-        pipe.copy(f"trending:{cat}:w:{w_end}", f"trending:{cat}", replace=True)
-        pipe.zadd("trending:categories", {cat: w_end})
+        # this window contains the newest event of `cat`, so it was written just above
+        serving = serving_window_end(w_end, window_s, slide_s)
+        pipe.copy(f"trending:{cat}:w:{serving}", f"trending:{cat}", replace=True)
+        pipe.zadd("trending:categories", {cat: serving})
     pipe.execute()
 
 

@@ -50,12 +50,49 @@ def stream_side(s, ds: str) -> pd.DataFrame:
     return funnel.merge(purchases, on="hour", how="outer")
 
 
-def compare(batch: pd.DataFrame, stream: pd.DataFrame, ds: str, warn_pct: float) -> pd.DataFrame:
+def stream_started_at(s) -> pd.Timestamp | None:
+    """First minute the speed layer ever produced (startingOffsets=latest => hours before it,
+    and the start hour itself, only saw part of the traffic)."""
+    df = query_df(s, f"SELECT min(window_start) AS t FROM {s.serving.clickhouse_db}.rt_funnel_1m")
+    t = df["t"].iloc[0] if not df.empty else None
+    if t is None or pd.isna(t):
+        return None
+    t = pd.Timestamp(t)
+    if t.tzinfo is not None:
+        t = t.tz_convert("UTC").tz_localize(None)
+    return None if t.year < 2000 else t  # min() of an empty table = 1970-01-01
+
+
+def coverage_status(hour: int, ds: str, b_events: float, s_events: float,
+                    stream_start: pd.Timestamp | None) -> str | None:
+    """Hours that cannot be compared fairly (excluded from the fail gate, still reported):
+    no_stream  : speed layer produced nothing that hour (downtime / not started) -> visible, not a diff
+    partial    : the hour the speed layer started in (it read Kafka from `latest`)
+    no_batch   : stream has data, batch none (the D+1 landing has not been loaded yet)"""
+    if stream_start is not None:
+        start_hour = stream_start.floor("h")
+        this_hour = pd.Timestamp(ds) + pd.Timedelta(hours=hour)
+        if this_hour < start_hour:
+            return "no_stream"
+        if this_hour == start_hour:
+            return "partial"
+    if s_events == 0 and b_events > 0:
+        return "no_stream"
+    if b_events == 0 and s_events > 0:
+        return "no_batch"
+    return None
+
+
+def compare(batch: pd.DataFrame, stream: pd.DataFrame, ds: str, warn_pct: float,
+            stream_start: pd.Timestamp | None = None) -> pd.DataFrame:
     m = batch.merge(stream, on="hour", how="outer", suffixes=("_batch", "_stream")).fillna(0)
     rows = []
     for _, r in m.iterrows():
         pairs = {k: (r[f"{k}_batch"], r[f"{k}_stream"]) for k in METRICS}
         pairs["purchases_enriched"] = (r["purchases_batch"], r.get("enriched_purchases", 0))
+        n_batch = sum(float(r[f"{k}_batch"]) for k in ("views", "carts", "purchases"))
+        n_stream = sum(float(r[f"{k}_stream"]) for k in ("views", "carts", "purchases"))
+        coverage = coverage_status(int(r["hour"]), ds, n_batch, n_stream, stream_start)
         for metric, (b, st) in pairs.items():
             diff = float(b) - float(st)
             pct = abs(diff) / float(b) if b else (0.0 if not st else 1.0)
@@ -63,7 +100,7 @@ def compare(batch: pd.DataFrame, stream: pd.DataFrame, ds: str, warn_pct: float)
                 "check_date": pd.to_datetime(ds).date(), "hour": int(r["hour"]), "metric": metric,
                 "batch_value": float(b), "stream_value": float(st), "abs_diff": diff, "diff_pct": pct,
                 "late_events": int(r.get("late_events", 0)),
-                "status": "ok" if pct <= warn_pct else "warn",
+                "status": coverage or ("ok" if pct <= warn_pct else "warn"),
             })
     return pd.DataFrame(rows)
 
@@ -73,14 +110,21 @@ def main(argv: list[str] | None = None) -> int:
                                            p.add_argument("--fail-above", type=float, default=1.0)))
     s = get_settings()
     spark = get_spark(f"reconciliation_{args.ds}")
-    result = compare(batch_side(spark, args.ds), stream_side(s, args.ds), args.ds, args.warn_above)
+    result = compare(batch_side(spark, args.ds), stream_side(s, args.ds), args.ds, args.warn_above,
+                     stream_started_at(s))
     if result.empty:
         log.warning("nothing to reconcile for %s", args.ds)
         return 0
     overwrite_partition(spark.createDataFrame(result), GOLD_RECONCILIATION, f"check_date = '{args.ds}'")
-    worst = result.groupby("metric")["diff_pct"].max().to_dict()
-    log.info("reconciliation %s worst diff per metric: %s", args.ds, worst)
     spark.stop()
+    log.info("reconciliation %s hours per status: %s", args.ds,
+             result.drop_duplicates("hour")["status"].value_counts().to_dict())
+    gated = result[result["status"].isin(["ok", "warn"])]
+    if gated.empty:
+        log.warning("no fully covered hour on %s — nothing to gate on", args.ds)
+        return 0
+    worst = gated.groupby("metric")["diff_pct"].max().to_dict()
+    log.info("reconciliation %s worst diff per metric (covered hours): %s", args.ds, worst)
     return 2 if max(worst.values()) > args.fail_above else 0
 
 

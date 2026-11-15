@@ -49,6 +49,22 @@ def test_reconciliation_compare_marks_warn():
     assert (out.loc[out["metric"] == METRICS[0], "status"] == "warn").all()
 
 
+def test_reconciliation_excludes_hours_without_full_coverage():
+    from pipelines.batch.reconciliation import METRICS, compare
+
+    full = {m: 100 for m in METRICS}
+    zero = {m: 0 for m in METRICS}
+    batch = pd.DataFrame([{"hour": h, **full, "late_events": 0} for h in (9, 10, 11)]
+                         + [{"hour": 12, **zero, "late_events": 0}])
+    stream = pd.DataFrame([{"hour": 10, **{m: 40 for m in METRICS}, "enriched_purchases": 40},
+                           {"hour": 11, **full, "enriched_purchases": 100},
+                           {"hour": 12, **full, "enriched_purchases": 100}])
+    out = compare(batch, stream, "2026-10-25", warn_pct=0.02,
+                  stream_start=pd.Timestamp("2026-10-25 10:17"))
+    status = out.drop_duplicates("hour").set_index("hour")["status"].to_dict()
+    assert status == {9: "no_stream", 10: "partial", 11: "ok", 12: "no_batch"}
+
+
 class FakeState:
     """Minimal GroupState stand-in for applyInPandasWithState unit tests."""
 

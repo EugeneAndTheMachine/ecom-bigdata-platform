@@ -26,8 +26,11 @@ def main() -> int:
     spark = get_spark("ml_batch_scoring")
     model = ALSModel.load(f"{model_root()}/champion")
     ev = spark.read.format("delta").load(SILVER_EVENTS.path).where("NOT is_bot")
-    max_date = ev.agg(F.max("event_date")).first()[0]
-    active = (ev.where(F.col("event_date") > F.date_sub(F.lit(max_date), ACTIVE_DAYS))
+    # "active" per timeline (replay = now, bulk = 2019-10..2020-04): a single max over both
+    # would only ever keep replay users
+    last_day = ev.groupBy("_source").agg(F.max("event_date").alias("last_day"))
+    active = (ev.join(F.broadcast(last_day), "_source")
+              .where(F.col("event_date") > F.date_sub(F.col("last_day"), ACTIVE_DAYS))
               .select(F.col("user_id").cast("int").alias("user_id")).distinct())
 
     recs = (model.recommendForUserSubset(active, s.recs_top_n)

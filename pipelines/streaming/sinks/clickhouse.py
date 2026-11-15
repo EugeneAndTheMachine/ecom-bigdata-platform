@@ -6,28 +6,33 @@ ReplacingMergeTree(version) + ORDER BY the business key -> a replayed batch over
 """
 from __future__ import annotations
 
+import threading
 from datetime import UTC, datetime
 
 import pandas as pd
 
 from ecom_common.config import Settings
 
-_CLIENTS: dict[str, object] = {}
+# One client PER THREAD: in dev all streaming queries share one driver and Spark runs each
+# query's foreachBatch on its own thread. A clickhouse-connect client holds one HTTP session,
+# and concurrent requests on the same session fail ("concurrent queries within the same session").
+_LOCAL = threading.local()
 
 
 def _client(s: Settings):
     import clickhouse_connect  # imported lazily: only drivers need it
 
+    clients: dict[str, object] = _LOCAL.__dict__.setdefault("clients", {})
     key = f"{s.serving.clickhouse_host}:{s.serving.clickhouse_port}"
-    if key not in _CLIENTS:
-        _CLIENTS[key] = clickhouse_connect.get_client(
+    if key not in clients:
+        clients[key] = clickhouse_connect.get_client(
             host=s.serving.clickhouse_host,
             port=s.serving.clickhouse_port,
             username=s.serving.clickhouse_user,
             password=s.serving.clickhouse_password,
             database=s.serving.clickhouse_db,
         )
-    return _CLIENTS[key]
+    return clients[key]
 
 
 def insert_df(s: Settings, table: str, pdf: pd.DataFrame, version_col: str | None = "updated_at") -> int:

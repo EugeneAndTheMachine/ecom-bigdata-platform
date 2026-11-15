@@ -58,3 +58,12 @@ def normalize_brand(col: str = "brand") -> Column:
 def natural_key() -> list[str]:
     """Dedup key in Silver: identical events from replay duplicates or the source file itself."""
     return ["user_session", "event_time", "product_id", "event_type"]
+
+
+def event_id_col(event_time: str = "event_time") -> Column:
+    """sha256 of natural_key() — the replay producer emits the same value
+    (producer.transform.event_id_for), so the stream's dedup on event_id and Silver's dedup on
+    natural_key() remove the same rows. Needs a UTC Spark session.
+    """
+    return F.sha2(F.concat_ws("|", F.col("user_session"), F.col(event_time).cast("string"),
+                              F.col("product_id").cast("string"), F.col("event_type")), 256)

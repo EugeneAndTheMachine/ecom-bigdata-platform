@@ -40,7 +40,11 @@ def write_trending(r: redis.Redis, rows: Iterable[tuple[str, int, int, float]],
                    window_s: int, slide_s: int) -> None:
     """rows: (category_l1, window_end_epoch, product_id, score). Update-mode values are FULL
     aggregates, so ZADD (set) is idempotent. Then the window covering the full last `window_s`
-    per category becomes `trending:{cat}` via COPY ... REPLACE (atomic swap for readers)."""
+    per category becomes `trending:{cat}` via COPY ... REPLACE (atomic swap for readers).
+
+    A micro-batch that only carries late events updates OLDER windows; those must not replace
+    a newer `trending:{cat}`. `trending:categories` holds the published window_end per category
+    and is the guard (single writer: the trending query)."""
     latest: dict[str, int] = {}
     pipe = r.pipeline(transaction=False)
     for cat, w_end, product_id, score in rows:
@@ -49,10 +53,19 @@ def write_trending(r: redis.Redis, rows: Iterable[tuple[str, int, int, float]],
         pipe.expire(key, TRENDING_WINDOW_TTL_S)
         latest[cat] = max(latest.get(cat, 0), w_end)
     pipe.execute()
+    if not latest:
+        return
+    cats = list(latest)
     pipe = r.pipeline(transaction=False)
-    for cat, w_end in latest.items():
+    for cat in cats:
+        pipe.zscore("trending:categories", cat)
+    published = pipe.execute()
+    pipe = r.pipeline(transaction=False)
+    for cat, current in zip(cats, published, strict=True):
         # this window contains the newest event of `cat`, so it was written just above
-        serving = serving_window_end(w_end, window_s, slide_s)
+        serving = serving_window_end(latest[cat], window_s, slide_s)
+        if current is not None and serving < float(current):
+            continue  # late-only batch: keep the newer window that is already published
         pipe.copy(f"trending:{cat}:w:{serving}", f"trending:{cat}", replace=True)
         pipe.zadd("trending:categories", {cat: serving})
     pipe.execute()

@@ -18,6 +18,7 @@ from pyspark.sql import functions as F
 from ecom_common.log import get_logger
 from ecom_common.spark import get_spark
 from ecom_common.tables import BRONZE_CLICKSTREAM
+from ecom_common.transforms import event_id_col
 
 log = get_logger("bulk_backfill")
 
@@ -36,9 +37,9 @@ def main(argv: list[str] | None = None) -> int:
     df = (
         raw.withColumn("event_time", ts)
         .withColumn("original_event_time", F.col("event_time"))
-        # deterministic id => re-running the backfill never creates new identities
-        .withColumn("event_id", F.sha2(F.concat_ws("|", "user_session", F.col("event_time").cast("string"),
-                                                     "product_id", "event_type", "price"), 256))
+        # deterministic id = sha256(natural key), same formula as the replay producer
+        # => re-running the backfill never creates new identities
+        .withColumn("event_id", event_id_col("event_time"))
         .withColumn("chaos_tag", F.lit(None).cast("string"))
         .withColumn("_kafka_partition", F.lit(None).cast("int"))
         .withColumn("_kafka_offset", F.lit(None).cast("long"))

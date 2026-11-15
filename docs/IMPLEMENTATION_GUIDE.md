@@ -414,7 +414,7 @@ Superset → *SQL Lab* → database `Lakehouse (Trino)` → `SELECT * FROM delta
 ```
 reader.iter_rows()          # pyarrow đọc CSV.gz theo block 32MB, parse "… UTC", sort trong block
    │
-transform.to_record()       # validate → InvalidEvent(reason) ⇒ DLQ ; sinh event_id (uuid4)
+transform.to_record()       # validate → InvalidEvent(reason) ⇒ DLQ ; sinh event_id = sha256(natural key)
    │                         # ReplayClock: event_time mới, original_event_time = gốc
 chaos.ChaosInjector         # (tùy chọn) giữ lại event để phát trễ, nhân bản, sinh bot burst
    │
@@ -430,7 +430,7 @@ publisher.ClickstreamPublisher
 | Quyết định | Lý do |
 |---|---|
 | **Key = `user_session`** | Mọi event của một session vào cùng partition ⇒ giữ thứ tự trong session (quan trọng cho state Q3), phân phối đều (session nhiều hơn user, tránh hot key của user/bot) |
-| `event_id` = UUID sinh tại producer | REES46 không có ID; cần khóa để dedup ở stream (`dropDuplicatesWithinWatermark`). Chaos *duplicate* gửi lại **cùng** `event_id` ⇒ test được dedup |
+| `event_id` = sha256(user_session, event_time, product_id, event_type) sinh tại producer (đúng natural key của Silver) | REES46 không có ID; cần khóa để dedup ở stream (`dropDuplicatesWithinWatermark`). Khóa tất định ⇒ dòng trùng trong file nguồn có cùng `event_id`, nên stream và Silver (dedup theo natural key) loại **cùng** một tập bản trùng. Chaos *duplicate* gửi lại **cùng** `event_id` ⇒ test được dedup |
 | `REPLAY_TIME_MODE=shift` | Dashboard "5 phút gần nhất" chỉ có nghĩa nếu event_time ≈ now. Giữ `original_event_time` để truy vết |
 | `enable.idempotence=true`, `acks=all`, `compression=lz4`, `linger.ms` | Exactly-once phía producer (không trùng khi retry), throughput tốt |
 | Validate trước khi gửi ⇒ DLQ | Dữ liệu bẩn không làm vỡ consumer; DLQ được Kafka Connect đưa xuống landing để phân tích |
@@ -801,7 +801,7 @@ GET /health · GET /metrics (Prometheus: request latency, reco_stage_seconds{sta
 
 | Field | Kiểu | Bắt buộc | Ghi chú |
 |---|---|---|---|
-| event_id | string | ✔ | UUID (replay) |
+| event_id | string | ✔ | sha256(natural key) |
 | event_time | timestamp-millis | ✔ | Thời gian sự kiện (đã shift khi replay) |
 | original_event_time | timestamp-millis | ✔ | Thời gian gốc REES46 |
 | event_type | string | ✔ | view, cart, remove_from_cart, purchase |

@@ -4,7 +4,7 @@
   "namespace": "com.ecom.clickstream.v1",
   "doc": "One REES46 behaviour event replayed into Kafka. Subject: ecom.clickstream.v1-value (BACKWARD compatible). New fields MUST have a default.",
   "fields": [
-    {"name": "event_id", "type": "string", "doc": "UUIDv4 assigned by the producer; used for dedup"},
+    {"name": "event_id", "type": "string", "doc": "sha256 of the Silver natural key (user_session|event_time|product_id|event_type); rows Silver treats as duplicates share it; used for dedup"},
     {"name": "event_time", "type": {"type": "long", "logicalType": "timestamp-millis"}, "doc": "Event time after replay shift (drives windows & watermark)"},
     {"name": "original_event_time", "type": {"type": "long", "logicalType": "timestamp-millis"}, "doc": "Event time as found in the REES46 file"},
     {"name": "event_type", "type": "string", "doc": "view | cart | remove_from_cart | purchase"},

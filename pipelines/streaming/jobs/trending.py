@@ -15,11 +15,14 @@ from pipelines.streaming.sinks import clickhouse, redis_sink
 
 NAME = "trending_10m"
 COLUMNS = ["window_start", "window_end", "category_l1", "product_id", "views", "carts", "purchases", "score"]
+WINDOW_S = 600
+SLIDE_S = 60
 
 
 def build(events: DataFrame) -> DataFrame:
     return (
-        events.groupBy(F.window("event_time", "10 minutes", "1 minute"), "category_l1", "product_id")
+        events.groupBy(F.window("event_time", f"{WINDOW_S} seconds", f"{SLIDE_S} seconds"),
+                       "category_l1", "product_id")
         .agg(count_if("view", "views"), count_if("cart", "carts"), count_if("purchase", "purchases"),
              F.sum(event_weight()).alias("score"))
         .select(*window_cols(), "category_l1", "product_id", "views", "carts", "purchases", "score")
@@ -38,7 +41,7 @@ def start(spark: SparkSession, s: Settings) -> StreamingQuery:
                   .head(s.streaming.trending_top_k * 5))
         rows = ((r.category_l1, int(r.window_end.timestamp()), int(r.product_id), float(r.score))
                 for r in top.itertuples(index=False))
-        redis_sink.write_trending(redis_sink.get_client(s), rows)
+        redis_sink.write_trending(redis_sink.get_client(s), rows, WINDOW_S, SLIDE_S)
 
     return (
         build(clean_events(spark, s)).writeStream.outputMode("update")

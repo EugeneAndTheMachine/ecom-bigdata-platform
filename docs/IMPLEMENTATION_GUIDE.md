@@ -302,6 +302,7 @@ Giảm tải khi máy yếu: `SPARK_WORKER_MEMORY=4g`, `STREAMING_JOBS=funnel,tr
 | `BOT_ZSCORE_THRESHOLD` / `BOT_MIN_EVENTS_10S` | 3.0 / 20 | Q4 |
 | `LAKEHOUSE_ROOT` / `CHECKPOINT_ROOT` | (rỗng) | Override `s3a://lakehouse` (vd. `file:///tmp/lh` để test local) |
 | `INTENT_MODEL_URI` | models:/purchase_intent@champion | Model API nạp lúc khởi động |
+| `ML_SOURCE` | auto | Timeline mà feature/ML neo vào: `auto` (bulk nếu đã backfill, ngược lại replay), `bulk_csv`, `kafka_connect`, `all` (xem §9) |
 
 **Bảo mật**: `.env` đã nằm trong `.gitignore`; các secret trong `.env.example` chỉ là giá trị dev. Môi trường thật: dùng secret manager (Vault/SOPS/Docker secrets), đổi toàn bộ password, bật TLS cho MinIO/Kafka. `pre-commit` có `gitleaks` và `detect-private-key`.
 
@@ -534,7 +535,7 @@ Kafka (startingOffsets=latest, maxOffsetsPerTrigger=200k, failOnDataLoss=false)
 | `trending_10m` | Q2 | sliding window 10' / slide 1' × category × product, score = Σ weight (view 1, cart 3, purchase 5) | update | ClickHouse `rt_trending_10m`, Redis `trending:{cat}` |
 | `sessions_closed` | Q3 (báo cáo) | `session_window(event_time, 30 min)` × user_session | append (chỉ emit khi session đóng) | ClickHouse `rt_sessions`, Kafka `agg.sessions` |
 | `session_state` | Q3 (cảnh báo) + feature online Q7 | `applyInPandasWithState`, `EventTimeTimeout` 30' | update | Redis `session:{id}`, Kafka `alerts.cart_abandon`, ClickHouse `rt_cart_abandon` |
-| `bot_detection` | Q4 | tumbling 10s × user_id → z-score theo cửa sổ | update | ClickHouse `rt_bot_alerts`, Redis `bots:active`, Kafka `alerts.bot` |
+| `bot_detection` | Q4 | tumbling 10s × user_id → z-score theo cửa sổ | append (cửa sổ đã chốt) | ClickHouse `rt_bot_alerts`, Redis `bots:active`, Kafka `alerts.bot` |
 | `revenue_enriched` | Q5 preview | stream–static join purchase ⋈ `silver.products_scd2` (current) | append | ClickHouse `rt_purchases` |
 | `dlq` | – | record invalid | append | Kafka `ecom.clickstream.dlq` |
 
@@ -547,7 +548,7 @@ Kafka (startingOffsets=latest, maxOffsetsPerTrigger=200k, failOnDataLoss=false)
 - Sliding window ⇒ mỗi event thuộc 10 window ⇒ state ×10; giữ ở mức chấp nhận được nhờ watermark.
 - **Không xếp hạng trong Spark**: ranking trong một micro-batch update-mode là sai (batch chỉ chứa các row vừa thay đổi). Thay vào đó:
   - ClickHouse: dashboard dùng `ORDER BY score DESC LIMIT 10 BY category_l1` trên window mới nhất.
-  - Redis: ghi ZSET theo window `trending:{cat}:w:{window_end}` (ZADD set = idempotent), rồi `COPY … REPLACE` window mới nhất sang `trending:{cat}` (atomic swap cho reader), TTL 20'. `trending:categories` (ZSET cat → window_end) cho API biết category nào có dữ liệu.
+  - Redis: ghi ZSET theo window `trending:{cat}:w:{window_end}` (ZADD set = idempotent), rồi `COPY … REPLACE` window phủ đủ 10' gần nhất (`window_end` lớn nhất − 9', vì window có `window_end` lớn nhất mới mở, chỉ chứa ~1' dữ liệu) sang `trending:{cat}` (atomic swap cho reader), TTL 20'. `trending:categories` (ZSET cat → window_end) cho API biết category nào có dữ liệu.
 
 #### 7.2.3 Session state & cart abandonment (Q3)
 
@@ -564,6 +565,7 @@ State mỗi `user_session`: `(user_id, n_views, n_carts, n_removes, n_purchases,
 
 - Đếm event/user trong cửa sổ 10s; trong mỗi micro-batch tính `z = (count − mean)/std` theo window; flag nếu `z > BOT_ZSCORE_THRESHOLD` **và** `count ≥ BOT_MIN_EVENTS_10S` (tránh flag khi phân phối hẹp).
 - Hàm `score()` thuần pandas ⇒ unit test (`tests/unit/test_pure_functions.py`).
+- **Append mode**: cửa sổ chỉ được emit một lần khi watermark vượt qua, với số đếm cuối cùng và toàn bộ user của cửa sổ trong cùng micro-batch ⇒ z-score tính trên quần thể đầy đủ, mỗi user bị cảnh báo một lần/cửa sổ. Đổi lại alert trễ ≈ watermark + 10s.
 - Output: Redis `bots:active` (SET, TTL 1h) ⇒ API trả 429 cho bot; Kafka `alerts.bot` ⇒ landing ⇒ `bronze.alerts_bot` ⇒ Silver gắn `is_bot`.
 - Đánh giá: precision/recall so với `chaos_tag='bot'` (ground truth). Batch bổ sung rule offline (> 60 event/phút) và có thể nâng lên Isolation Forest ở phase sau.
 
@@ -647,7 +649,7 @@ Các bước (đúng thứ tự trong code):
 1. Đọc `bronze.clickstream WHERE ingest_date = D`.
 2. **DQ gate** (`pipelines/quality/checks.py::CLICKSTREAM_CHECKS`): mỗi row được gắn mảng `_dq_failed`; row lỗi ⇒ `s3a://lakehouse/quarantine/silver/events` (kèm `quarantine_date`); tổng kết theo check ⇒ `silver.dq_results`; nếu tỷ lệ lỗi > **5%** ⇒ raise `DataQualityError` ⇒ task Airflow fail ⇒ Gold không bị build trên dữ liệu bẩn.
 3. Conform: `brand` chuẩn hóa, `category_l1/l2/l3`, `event_date`, `event_hour`, `arrived_late = (ingest_date > event_date)` hoặc `_kafka_ts − event_time > watermark`.
-4. **Bot**: hợp của (a) user có alert online trong `bronze.alerts_bot` và (b) rule offline > 60 event/phút ⇒ `silver.bot_users` (partition event_date) ⇒ cột `is_bot`. *Không xóa* event bot — giữ để phân tích, các mart/ML lọc `NOT is_bot`.
+4. **Bot**: hợp của (a) user có alert online trong `bronze.alerts_bot` và (b) rule offline > 60 event/phút ⇒ `silver.bot_users` (partition event_date, **MERGE** theo `(user_id, event_date)`, hợp `sources` — không ghi đè, vì mỗi run chỉ thấy event nạp trong ngày của nó) ⇒ cột `is_bot`. *Không xóa* event bot — giữ để phân tích, các mart/ML lọc `NOT is_bot`.
 5. **Dedup + MERGE insert-only** vào `silver.events` theo **natural key** `(user_session, event_time, product_id, event_type)` (không dùng event_id vì bulk và replay sinh id khác nhau; landing có thể trùng do scheduled rotation). Khi trùng: chỉ nâng cờ `is_bot` (`t.is_bot OR s.is_bot`).
 6. MERGE chỉ quét các partition `event_date` xuất hiện trong batch (pruning) ⇒ event trễ nhiều ngày vẫn vào đúng partition của nó.
 
@@ -689,7 +691,7 @@ sources (delta.silver.*, delta.ml.*)
 
 | Bảng | Grain | Khóa | Ghi chú |
 |---|---|---|---|
-| `fact_events` | 1 event | `event_id`; FK `date_key`, `product_key`, `user_id` | incremental `merge`, partition `event_date`, xử lý lại `lookback_days=3` ngày gần nhất mỗi lần chạy (bắt event trễ) |
+| `fact_events` | 1 event | `event_id`; FK `date_key`, `product_key`, `user_id` | incremental `merge`, partition `event_date`, xử lý lại event có `event_date` **hoặc** `ingested_at` trong `lookback_days=3` ngày gần nhất (bắt event trễ và bulk backfill nạp sau replay) |
 | `fact_sessions` | 1 session | `user_session` | từ silver.sessions |
 | `fact_order_items` | 1 event purchase | `order_item_id` | `order_id = user_session#event_date` ([ADR-0003](adr/0003-order-definition.md)) |
 | `fact_orders` | 1 order | `order_id` | revenue, n_items ⇒ AOV |
@@ -740,7 +742,7 @@ spark.read.format("delta").option("versionAsOf", 12).load("s3a://lakehouse/silve
 
 ### 9.1 Phân khúc khách hàng — `segmentation.py` (Q6)
 
-- Input `gold.feat_user_offline`: recency (ngày từ lần mua cuối), frequency (số order), monetary (doanh thu) trong `feature_window_days=30` (dbt var; tăng lên 90–180 khi đã backfill đủ lịch sử).
+- Input `gold.feat_user_offline`: recency (ngày từ lần mua cuối), frequency (số order), monetary (doanh thu) trong `feature_window_days=30` (dbt var; tăng lên 90–180 khi đã backfill đủ lịch sử). Cửa sổ neo vào `as_of_date` = ngày cuối của **một** timeline (`ML_SOURCE`, macro `ml_source_predicate`) và chặn cả hai đầu, vì replay mang ngày hiện tại còn bulk mang 2019–2020.
 - log1p(F, M) → StandardScaler → **K-means** k = 3..7, chọn k theo silhouette; log mọi k vào MLflow.
 - Gán nhãn cụm theo điểm giá trị `−R + F + M` của tâm cụm ⇒ `champions, loyal, potential, needs_attention, at_risk, …` (`label_segments`, có unit test). `churn_risk = recency > 45 ngày`.
 - Output `ml.user_segments` (Delta) ⇒ `register_tables` ⇒ dbt `dim_user+` rebuild.
@@ -754,7 +756,7 @@ spark.read.format("delta").option("versionAsOf", 12).load("s3a://lakehouse/silve
 
 ### 9.3 Recommendation — `als_recommender.py` + `batch_scoring.py` (Q7)
 
-- Implicit feedback từ `silver.events` (`NOT is_bot`), 90 ngày: rating = log1p(Σ weight) với view=1, cart=3, purchase=5.
+- Implicit feedback từ `silver.events` (`NOT is_bot`, một timeline theo `ML_SOURCE` — `pipelines/ml/common.py::ml_events`), 90 ngày: rating = log1p(Σ weight) với view=1, cart=3, purchase=5.
 - Holdout 7 ngày cuối: relevant = sản phẩm user tương tác trong holdout. Metric **Recall@10, NDCG@10**, so với baseline **popularity**. ALS(rank 32, regParam 0.1, alpha 10, maxIter 10).
 - Model lưu `s3a://lakehouse/ml/models/als/<run_id>` + bản `champion` khi NDCG tốt hơn.
 - `batch_scoring`: top-50 (`RECS_TOP_N`) cho user hoạt động ⇒ `ml.user_recs` (Delta) + Redis `recs:{user_id}` = JSON `[{"p":product_id,"s":score},…]` TTL 8 ngày; `product:category` HASH (product → category_l1) cho phần boost category.
@@ -871,12 +873,14 @@ batch  = silver.events WHERE event_date = D AND _source = 'kafka_connect'   GROU
 stream = ClickHouse rt_funnel_1m FINAL WHERE toDate(window_start) = D       GROUP BY toHour       (views, carts, purchases, revenue)
        + rt_purchases FINAL                                                 (purchases_enriched)
 diff_pct = |batch − stream| / batch   → status ok/warn → gold.mart_reconciliation (replaceWhere check_date)
+         giờ không so sánh công bằng được → status no_stream / partial / no_batch (ghi lại, không tính vào ngưỡng fail)
 ```
 
 Diễn giải chênh lệch (ghi vào báo cáo):
 
 - **stream < batch**: event trễ quá watermark (đếm được qua `late_events`), hoặc speed layer downtime.
 - **stream > batch**: duplicate lọt dedup (vd. trùng ngoài khoảng watermark), hoặc batch chưa có event của 00:00–02:00 ngày D+1 thuộc D (DAG chạy lúc 02:00) ⇒ chạy lại reconciliation hôm sau sẽ khớp hơn.
+- `no_stream`: speed layer không có dữ liệu giờ đó (chưa chạy hoặc downtime — xem trên Superset); `partial`: giờ speed layer bắt đầu đọc Kafka (`startingOffsets=latest`); `no_batch`: landing D+1 chưa nạp.
 - Bot **được tính** ở cả hai phía (speed không lọc bot) ⇒ so sánh công bằng.
 
 Superset: chart `diff_pct` theo giờ × metric; mục tiêu < 2% cho views/carts.

@@ -1,5 +1,8 @@
--- Grain: one event. Incremental MERGE on event_id with a look-back window so late events
--- merged into Silver after the fact are picked up.
+-- Grain: one event. Incremental MERGE on event_id. A row is (re)processed when it is recent
+-- on EITHER clock:
+--   * event_date within lookback_days of the newest event   -> late events of recent days
+--   * ingested_at within lookback_days of the newest ingest -> a bulk backfill of 2019 history
+--     loaded after the replay (whose event_date is "now") would otherwise never be picked up.
 {{ config(
     materialized='incremental',
     incremental_strategy='merge',
@@ -20,6 +23,8 @@ select
     e.brand,
     e.event_type,
     e.price,
+    e.source_system,
+    e.ingested_at,
     e.event_date
 from {{ ref('stg_events') }} as e
 left join {{ ref('dim_product') }} as p
@@ -29,6 +34,10 @@ left join {{ ref('dim_product') }} as p
 {% if is_incremental() %}
 where e.event_date >= (
     select coalesce(max(event_date), date '1970-01-01') - interval '{{ var("lookback_days") }}' day
+    from {{ this }}
+)
+   or e.ingested_at >= (
+    select coalesce(max(ingested_at), timestamp '1970-01-01 00:00:00') - interval '{{ var("lookback_days") }}' day
     from {{ this }}
 )
 {% endif %}

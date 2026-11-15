@@ -1,7 +1,12 @@
 """Q4 — Bot detection: events per user per 10-second tumbling window, flag z-score outliers.
 
-z = (count - mean) / std computed across all users active in the same window (population
-seen in the micro-batch). A minimum absolute count guards against tiny populations.
+z = (count - mean) / std computed across all users active in the same window. A minimum
+absolute count guards against tiny populations.
+
+APPEND mode: a window is emitted once, when the watermark passes its end, with its FINAL
+counts and ALL of its users in the same micro-batch. (UPDATE mode would score partial
+counts against only the users that changed in that trigger, and re-alert the same user
+on every trigger.) Cost: an alert lands ≈ watermark + 10 s after the burst.
 This rule is the online stage; the batch layer can refine it (e.g. Isolation Forest) and
 Silver uses the union of online alerts to exclude bots (see pipelines/batch/silver_events.py).
 """
@@ -52,7 +57,7 @@ def start(spark: SparkSession, s: Settings) -> StreamingQuery:
         kafka_sink.publish_json(alerts, s, s.kafka.topic_alert_bot, key_col="user_id")
 
     return (
-        build(clean_events(spark, s)).writeStream.outputMode("update")
+        build(clean_events(spark, s)).writeStream.outputMode("append")
         .foreachBatch(sink)
         .option("checkpointLocation", checkpoint_path(NAME))
         .trigger(processingTime=f"{s.streaming.trigger_seconds} seconds")

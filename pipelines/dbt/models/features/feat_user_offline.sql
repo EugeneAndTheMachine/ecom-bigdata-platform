@@ -1,8 +1,12 @@
 -- Offline user features (RFM + behaviour), consumed BY PATH by Spark ML (segmentation)
 {{ config(properties=gold_location('feat_user_offline')) }}
 
+-- Anchored on ONE timeline (var ml_source); every window is bounded on both sides by as_of_date
+-- so rows of the other timeline never leak in.
 with asof as (
-    select max(event_date) as as_of_date from {{ ref('stg_events') }}
+    select max(event_date) as as_of_date
+    from {{ ref('stg_events') }}
+    where {{ ml_source_predicate() }}
 ),
 
 recent_events as (
@@ -10,6 +14,7 @@ recent_events as (
     from {{ ref('stg_events') }} as e
     cross join asof
     where e.event_date > asof.as_of_date - interval '{{ var("feature_window_days") }}' day
+      and e.event_date <= asof.as_of_date
 ),
 
 behaviour as (
@@ -43,12 +48,17 @@ rfm as (
         count(*)         as frequency,
         sum(revenue)     as monetary
     from {{ ref('fact_orders') }}
+    cross join asof
+    where order_date <= asof.as_of_date
     group by user_id
 ),
 
 sess as (
     select user_id, avg(duration_s) as avg_session_duration_s
     from {{ ref('stg_sessions') }}
+    cross join asof
+    where session_date > asof.as_of_date - interval '{{ var("feature_window_days") }}' day
+      and session_date <= asof.as_of_date
     group by user_id
 )
 

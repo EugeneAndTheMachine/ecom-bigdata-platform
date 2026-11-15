@@ -74,6 +74,19 @@ def online_bots(spark: SparkSession, ds) -> DataFrame | None:
             .distinct().withColumn("source", F.lit("stream_alert")))
 
 
+def merge_bot_users(spark: SparkSession, bots: DataFrame) -> None:
+    """Upsert (user_id, event_date) and union the sources. Never overwrite: a run only sees the
+    events ingested on its own ds, so it cannot re-derive bots found by earlier runs."""
+    if not delta_exists(spark, SILVER_BOT_USERS.path):
+        bots.write.format("delta").partitionBy(*SILVER_BOT_USERS.partition_by).save(SILVER_BOT_USERS.path)
+        return
+    (DeltaTable.forPath(spark, SILVER_BOT_USERS.path).alias("t")
+        .merge(bots.alias("s"), "t.user_id = s.user_id AND t.event_date = s.event_date")
+        .whenMatchedUpdate(set={"sources": "array_union(t.sources, s.sources)"})
+        .whenNotMatchedInsertAll()
+        .execute())
+
+
 def merge_events(spark: SparkSession, batch: DataFrame) -> None:
     if not delta_exists(spark, SILVER_EVENTS.path):
         batch.write.format("delta").partitionBy(*SILVER_EVENTS.partition_by).save(SILVER_EVENTS.path)
@@ -121,8 +134,7 @@ def main(argv: list[str] | None = None) -> int:
         bots = bots.unionByName(online)
     bots = bots.groupBy("user_id", "event_date").agg(F.collect_set("source").alias("sources")).cache()
     if bots.take(1):
-        overwrite_partition(bots, SILVER_BOT_USERS,
-                            "event_date IN (" + ",".join(f"'{d}'" for d in day_range(args.ds_date, 1, 1)) + ")")
+        merge_bot_users(spark, bots)
     events = (events.join(bots.select("user_id", "event_date", F.lit(True).alias("is_bot")),
                           ["user_id", "event_date"], "left")
                     .withColumn("is_bot", F.coalesce("is_bot", F.lit(False))))

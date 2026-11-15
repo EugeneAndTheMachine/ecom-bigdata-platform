@@ -15,6 +15,7 @@ select
     price,
     user_id,
     user_session,
-    _source as source_system
+    _source as source_system,
+    _ingest_ts as ingested_at
 from {{ source('silver', 'events') }}
 where not is_bot

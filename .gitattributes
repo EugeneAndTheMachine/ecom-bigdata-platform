@@ -1,0 +1,8 @@
+# Everything runs inside Linux containers: keep LF in the working tree on every OS
+# (Windows core.autocrlf=true would otherwise break shebangs: "bash\r: not found").
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.gz  binary
+*.parquet binary

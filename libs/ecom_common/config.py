@@ -79,6 +79,8 @@ class Settings:
     spark_master: str = field(default_factory=lambda: _env("SPARK_MASTER_URL", "local[*]"))
     mlflow_tracking_uri: str = field(default_factory=lambda: _env("MLFLOW_TRACKING_URI", "http://mlflow:5000"))
     recs_top_n: int = field(default_factory=lambda: int(_env("RECS_TOP_N", "50")))
+    # timeline ML trains on: auto | bulk_csv | kafka_connect | all (see pipelines/ml/common.py)
+    ml_source: str = field(default_factory=lambda: _env("ML_SOURCE", "auto"))
 
 
 @lru_cache(maxsize=1)

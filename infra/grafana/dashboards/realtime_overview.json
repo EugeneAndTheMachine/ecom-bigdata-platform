@@ -141,7 +141,7 @@
           "editorType": "sql",
           "format": 1,
           "queryType": "table",
-          "rawSql": "SELECT category_l1, product_id, score, views, carts, purchases\nFROM realtime.rt_trending_10m FINAL\nWHERE window_end = (SELECT max(window_end) FROM realtime.rt_trending_10m)\nORDER BY category_l1, score DESC\nLIMIT 10 BY category_l1"
+          "rawSql": "SELECT category_l1, product_id, score, views, carts, purchases\nFROM realtime.rt_trending_10m FINAL\nWHERE window_end = (SELECT max(window_end) - INTERVAL 9 MINUTE FROM realtime.rt_trending_10m)\nORDER BY category_l1, score DESC\nLIMIT 10 BY category_l1"
         }
       ],
       "fieldConfig": {

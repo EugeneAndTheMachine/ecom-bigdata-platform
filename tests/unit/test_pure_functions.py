@@ -110,3 +110,17 @@ def test_session_state_update_then_abandon():
     state.hasTimedOut = True
     out = list(fn(("s1",), iter([]), state))
     assert out and out[0].iloc[0]["kind"] == "abandon" and not state.exists
+
+
+@pytest.mark.parametrize("text, seconds", [
+    ("30 seconds", 30), ("2 minutes", 120), ("1 minute", 60), ("1 hour", 3600), ("2 hours", 7200), ("1 day", 86400),
+])
+def test_interval_seconds(text, seconds):
+    from pipelines.batch.utils import interval_seconds
+    assert interval_seconds(text) == seconds
+
+
+def test_interval_seconds_rejects_unknown_units():
+    from pipelines.batch.utils import interval_seconds
+    with pytest.raises(ValueError):
+        interval_seconds("3 fortnights")

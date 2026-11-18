@@ -28,7 +28,7 @@ from ecom_common.tables import (
     quarantine_path,
 )
 from ecom_common.transforms import category_levels, natural_key, normalize_brand
-from pipelines.batch.utils import day_range, delta_exists, overwrite_partition, parse_ds
+from pipelines.batch.utils import day_range, delta_exists, interval_seconds, overwrite_partition, parse_ds
 from pipelines.quality.checks import CLICKSTREAM_CHECKS, run_checks
 
 log = get_logger("silver_events")
@@ -106,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_ds(argv)
     s = get_settings()
     spark = get_spark(f"silver_events_{args.ds}")
-    wm_seconds = int(s.streaming.watermark.split()[0]) * (60 if "minute" in s.streaming.watermark else 1)
+    wm_seconds = interval_seconds(s.streaming.watermark)
 
     bronze = (spark.read.format("delta").load(BRONZE_CLICKSTREAM.path)
               .where(F.col("ingest_date") == args.ds))

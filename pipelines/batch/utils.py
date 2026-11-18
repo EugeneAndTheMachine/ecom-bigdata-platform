@@ -20,6 +20,21 @@ def parse_ds(argv: list[str] | None = None, extra: callable | None = None) -> ar
     return ns
 
 
+_UNIT_SECONDS = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}
+
+
+def interval_seconds(text: str) -> int:
+    """Spark-style interval string -> seconds: '30 seconds', '2 minutes', '1 hour', '1 day'."""
+    parts = text.strip().lower().split()
+    if len(parts) != 2:
+        raise ValueError(f"expected '<number> <unit>', got {text!r}")
+    amount, unit = parts
+    unit = unit.removesuffix("s")
+    if unit not in _UNIT_SECONDS:
+        raise ValueError(f"unsupported interval unit in {text!r}")
+    return int(float(amount) * _UNIT_SECONDS[unit])
+
+
 def day_range(ds: date, before: int = 0, after: int = 0) -> list[str]:
     return [(ds + timedelta(days=d)).isoformat() for d in range(-before, after + 1)]
 
